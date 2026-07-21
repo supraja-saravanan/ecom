@@ -1,0 +1,18 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: ecom-backend
+    env_file:
+      - ./backend/.env
+    ports:
+      - "5000:5000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ecom-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
