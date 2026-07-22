@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  labels:
+    app: ecom-frontend
+spec:
+  replicas: 1
+
+  selector:
+    matchLabels:
+      app: ecom-frontend
+
+  template:
+    metadata:
+      labels:
+        app: ecom-frontend
+
+    spec:
+      containers:
+        - name: frontend
+          image: acrecomdev00123.azurecr.io/ecom-frontend:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 80
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 20
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
