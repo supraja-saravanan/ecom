@@ -6,34 +6,89 @@ pool:
 
 variables:
   dockerRegistryServiceConnection: 'acrecomdev00123-acr'
+  azureServiceConnection: 'azure-ecom-dev'
+
+  acrLoginServer: 'acrecomdev00123.azurecr.io'
   backendRepository: 'ecom-backend'
   frontendRepository: 'ecom-frontend'
+
+  resourceGroup: 'rg-ecommerce-dev'
+  aksCluster: 'aks-ecommerce-dev'
   imageTag: '$(Build.BuildId)'
 
-steps:
-- checkout: self
-  displayName: 'Checkout source code'
+stages:
 
-- task: Docker@2
-  displayName: 'Build and push backend image'
-  inputs:
-    command: 'buildAndPush'
-    containerRegistry: '$(dockerRegistryServiceConnection)'
-    repository: '$(backendRepository)'
-    Dockerfile: '$(Build.SourcesDirectory)/backend/Dockerfile'
-    buildContext: '$(Build.SourcesDirectory)/backend'
-    tags: |
-      $(imageTag)
-      latest
+# =========================================================
+# STAGE 1: Build Docker images and push them to ACR
+# =========================================================
+- stage: Build
+  displayName: 'Build and push images'
 
-- task: Docker@2
-  displayName: 'Build and push frontend image'
-  inputs:
-    command: 'buildAndPush'
-    containerRegistry: '$(dockerRegistryServiceConnection)'
-    repository: '$(frontendRepository)'
-    Dockerfile: '$(Build.SourcesDirectory)/frontend/Dockerfile'
-    buildContext: '$(Build.SourcesDirectory)/frontend'
-    tags: |
-      $(imageTag)
-      latest
+  jobs:
+  - job: BuildImages
+    displayName: 'Build Docker images'
+
+    steps:
+    - checkout: self
+      displayName: 'Checkout source code'
+
+    - task: Docker@2
+      displayName: 'Build and push backend image'
+      inputs:
+        command: 'buildAndPush'
+        containerRegistry: '$(dockerRegistryServiceConnection)'
+        repository: '$(backendRepository)'
+        Dockerfile: '$(Build.SourcesDirectory)/backend/Dockerfile'
+        buildContext: '$(Build.SourcesDirectory)/backend'
+        tags: |
+          $(imageTag)
+          latest
+
+    - task: Docker@2
+      displayName: 'Build and push frontend image'
+      inputs:
+        command: 'buildAndPush'
+        containerRegistry: '$(dockerRegistryServiceConnection)'
+        repository: '$(frontendRepository)'
+        Dockerfile: '$(Build.SourcesDirectory)/frontend/Dockerfile'
+        buildContext: '$(Build.SourcesDirectory)/frontend'
+        tags: |
+          $(imageTag)
+          latest
+
+
+# =========================================================
+# STAGE 2: Deploy the newly built images to AKS
+# =========================================================
+- stage: Deploy
+  displayName: 'Deploy to AKS'
+  dependsOn: Build
+  condition: succeeded()
+
+  jobs:
+  - job: DeployToAKS
+    displayName: 'Apply Kubernetes manifests'
+
+    steps:
+    - checkout: self
+      displayName: 'Checkout Kubernetes manifests'
+
+    - task: KubernetesManifest@1
+      displayName: 'Deploy application to AKS'
+      inputs:
+        action: 'deploy'
+        connectionType: 'azureResourceManager'
+        azureSubscriptionConnection: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroup)'
+        kubernetesCluster: '$(aksCluster)'
+        namespace: 'default'
+
+        manifests: |
+          $(Build.SourcesDirectory)/kubernetes/backend-deployment.yaml
+          $(Build.SourcesDirectory)/kubernetes/backend-service.yaml
+          $(Build.SourcesDirectory)/kubernetes/frontend-deployment.yaml
+          $(Build.SourcesDirectory)/kubernetes/frontend-service.yaml
+
+        containers: |
+          $(acrLoginServer)/$(backendRepository):$(imageTag)
+          $(acrLoginServer)/$(frontendRepository):$(imageTag)
