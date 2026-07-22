@@ -1,0 +1,39 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  dockerRegistryServiceConnection: 'acrecomdev00123-acr'
+  backendRepository: 'ecom-backend'
+  frontendRepository: 'ecom-frontend'
+  imageTag: '$(Build.BuildId)'
+
+steps:
+- checkout: self
+  displayName: 'Checkout source code'
+
+- task: Docker@2
+  displayName: 'Build and push backend image'
+  inputs:
+    command: 'buildAndPush'
+    containerRegistry: '$(dockerRegistryServiceConnection)'
+    repository: '$(backendRepository)'
+    Dockerfile: '$(Build.SourcesDirectory)/backend/Dockerfile'
+    buildContext: '$(Build.SourcesDirectory)/backend'
+    tags: |
+      $(imageTag)
+      latest
+
+- task: Docker@2
+  displayName: 'Build and push frontend image'
+  inputs:
+    command: 'buildAndPush'
+    containerRegistry: '$(dockerRegistryServiceConnection)'
+    repository: '$(frontendRepository)'
+    Dockerfile: '$(Build.SourcesDirectory)/frontend/Dockerfile'
+    buildContext: '$(Build.SourcesDirectory)/frontend'
+    tags: |
+      $(imageTag)
+      latest
