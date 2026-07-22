@@ -5,28 +5,36 @@ pool:
   vmImage: ubuntu-latest
 
 variables:
+  # Existing ACR Docker service connection
   dockerRegistryServiceConnection: 'acrecomdev00123-acr'
+
+  # New Azure Resource Manager service connection
   azureServiceConnection: 'azure-ecom-dev'
 
   acrLoginServer: 'acrecomdev00123.azurecr.io'
+
   backendRepository: 'ecom-backend'
   frontendRepository: 'ecom-frontend'
 
   resourceGroup: 'rg-ecommerce-dev'
   aksCluster: 'aks-ecommerce-dev'
+  kubernetesNamespace: 'default'
+
+  # Unique image tag for every pipeline run
   imageTag: '$(Build.BuildId)'
+
 
 stages:
 
-# =========================================================
-# STAGE 1: Build Docker images and push them to ACR
-# =========================================================
+# ============================================================
+# STAGE 1: Build Docker images and push them to Azure ACR
+# ============================================================
 - stage: Build
   displayName: 'Build and push images'
 
   jobs:
   - job: BuildImages
-    displayName: 'Build Docker images'
+    displayName: 'Build backend and frontend images'
 
     steps:
     - checkout: self
@@ -57,38 +65,100 @@ stages:
           latest
 
 
-# =========================================================
-# STAGE 2: Deploy the newly built images to AKS
-# =========================================================
+# ============================================================
+# STAGE 2: Apply Kubernetes manifests and update image versions
+# ============================================================
 - stage: Deploy
-  displayName: 'Deploy to AKS'
+  displayName: 'Deploy application to AKS'
   dependsOn: Build
   condition: succeeded()
 
   jobs:
   - job: DeployToAKS
-    displayName: 'Apply Kubernetes manifests'
+    displayName: 'Deploy Kubernetes resources'
 
     steps:
     - checkout: self
       displayName: 'Checkout Kubernetes manifests'
 
-    - task: KubernetesManifest@1
-      displayName: 'Deploy application to AKS'
+    # Equivalent command:
+    # kubectl apply -f kubernetes/
+    - task: Kubernetes@1
+      displayName: 'kubectl apply Kubernetes manifests'
       inputs:
-        action: 'deploy'
-        connectionType: 'azureResourceManager'
-        azureSubscriptionConnection: '$(azureServiceConnection)'
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: '$(azureServiceConnection)'
         azureResourceGroup: '$(resourceGroup)'
         kubernetesCluster: '$(aksCluster)'
-        namespace: 'default'
+        namespace: '$(kubernetesNamespace)'
+        command: 'apply'
+        useConfigurationFile: true
+        configuration: '$(Build.SourcesDirectory)/kubernetes'
 
-        manifests: |
-          $(Build.SourcesDirectory)/kubernetes/backend-deployment.yaml
-          $(Build.SourcesDirectory)/kubernetes/backend-service.yaml
-          $(Build.SourcesDirectory)/kubernetes/frontend-deployment.yaml
-          $(Build.SourcesDirectory)/kubernetes/frontend-service.yaml
+    # Equivalent command:
+    # kubectl set image deployment/backend-deployment
+    # backend=acrecomdev00123.azurecr.io/ecom-backend:<BuildId>
+    - task: Kubernetes@1
+      displayName: 'Update backend image'
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroup)'
+        kubernetesCluster: '$(aksCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'set'
+        arguments: >
+          image deployment/backend-deployment
+          backend=$(acrLoginServer)/$(backendRepository):$(imageTag)
 
-        containers: |
-          $(acrLoginServer)/$(backendRepository):$(imageTag)
-          $(acrLoginServer)/$(frontendRepository):$(imageTag)
+    # Equivalent command:
+    # kubectl set image deployment/frontend-deployment
+    # frontend=acrecomdev00123.azurecr.io/ecom-frontend:<BuildId>
+    - task: Kubernetes@1
+      displayName: 'Update frontend image'
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroup)'
+        kubernetesCluster: '$(aksCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'set'
+        arguments: >
+          image deployment/frontend-deployment
+          frontend=$(acrLoginServer)/$(frontendRepository):$(imageTag)
+
+    # Wait until the backend deployment is healthy
+    - task: Kubernetes@1
+      displayName: 'Check backend rollout'
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroup)'
+        kubernetesCluster: '$(aksCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'rollout'
+        arguments: 'status deployment/backend-deployment --timeout=180s'
+
+    # Wait until the frontend deployment is healthy
+    - task: Kubernetes@1
+      displayName: 'Check frontend rollout'
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroup)'
+        kubernetesCluster: '$(aksCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'rollout'
+        arguments: 'status deployment/frontend-deployment --timeout=180s'
+
+    # Displays the resulting deployments, pods and services
+    - task: Kubernetes@1
+      displayName: 'Display AKS resources'
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscriptionEndpoint: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroup)'
+        kubernetesCluster: '$(aksCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'get'
+        arguments: 'deployments,pods,services -o wide' 
